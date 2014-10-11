@@ -2,11 +2,11 @@ package bilin_hadoop;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.StringTokenizer;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
@@ -33,13 +33,25 @@ public class Frequency2 extends Configured implements Tool {
 	private static final String FRQ = ".frq";
 	private static final String CNT = ".cnt";
 	private static Map<Integer, String> freqFormat = null;
+	static ArrayList<String> spl = new ArrayList<String>();
 	
 	@Override
 	public int run(String[] args) throws Exception {
 		
 		Configuration conf = new Configuration();
-//		String confPath = "conf/FRE.properties";
-		String confPath = "hdfs://master.bilintechnology.net:8020/conf/FRE.properties";
+
+		String confPath;
+		String datetime;
+		if(args.length >= 3)
+			confPath = args[2];
+		else
+//			confPath = "conf/FRE.properties";
+			confPath = "hdfs://namenode.bilintechnology.net:8020/conf/FRE.properties";
+//			confPath = "hdfs://namenode.bilintechnology.net:8020/user/luo/domain.properties";
+		if(args.length==4){
+			datetime=args[3];
+			conf.set("time", datetime);
+		}
 		conf.set(LOGTYPE, "freq");
 		conf.set(PATH, confPath);
 		Config.getInstance().loadConfig(conf.get(LOGTYPE),conf.get(PATH));
@@ -52,6 +64,7 @@ public class Frequency2 extends Configured implements Tool {
 		Job job = new Job(conf,"Frequency2");
 		job.setJarByClass(Frequency2.class);
 		job.setMapperClass(FrqMap.class);
+		job.setCombinerClass(Combine.class);
 		job.setReducerClass(FrqReduce.class);
 		job.setOutputKeyClass(Text.class);
 		job.setOutputValueClass(Text.class);
@@ -67,6 +80,10 @@ public class Frequency2 extends Configured implements Tool {
 	}
 
 	public static void main(String[] args) throws Exception {
+		if(args.length < 2){
+			System.out.println("Usage Frequency <in> <out>");
+			System.exit(2);
+		}
 		ToolRunner.run(new Frequency2(), args);
 	}
 	
@@ -88,31 +105,50 @@ public class Frequency2 extends Configured implements Tool {
 		protected void map(LongWritable key, Text value,
 				Mapper<LongWritable, Text, Text, IntWritable>.Context context)
 				throws IOException, InterruptedException {
-			String values = value.toString().replaceAll("\t\t", "\t \t");
-			StringTokenizer itrs = new StringTokenizer(values,SPLIT);
-			if(itrs.hasMoreTokens())
-				itrs.nextToken();
+
+			ArrayList<String> str = splits(value.toString(),SPLIT);
+			if(str.size() < Config.getInstance().getLogFormatMap().size()-1){
+				System.out.println("number of split : "+value.toString());
+				context.getCounter("Error_log", "count").increment(1);
+//			StringTokenizer itrs = new StringTokenizer(value.toString(),SPLIT);
+//			if(Config.getInstance().getLogFormatMap().size() > itrs.countTokens() 
+//					&& Config.getInstance().getLogFormatMap().size()!=0){
+//				System.out.println(value.toString());
+			}
+			else{
 			
-			int i=0;
-			while(itrs.hasMoreTokens()){
-				String attribute = itrs.nextToken();
-				if(freqFormat.get(i) != null){
-					String name = freqFormat.get(i);
-					if(!attribute.equals(" ")){
-						if(name.equals("referer")){
-							String[] domain = attribute.split("/");
-							if(domain.length>=3){
-								attribute = domain[2];
-								System.out.println(attribute);
+				int i=0;
+				for(String attribute : str){
+					if(freqFormat.get(i) != null){
+						String name = freqFormat.get(i);
+						context.getCounter("LINE_NUM", name).increment(1);
+						if(attribute.equals(" ") || attribute.equals("")){
+							context.write(new Text(name+"."+"empty"), new IntWritable(1));
+						}else{ 
+							if(name.equals("domain") || name.equals("referer")){
+								String[] domain = attribute.split("/");
+								if(domain.length>=3){
+									String[] simply_domain=domain[2].split("www.");
+									if(domain[2].split("www.").length >= 2)
+										attribute = simply_domain[1];
+									else
+										attribute = simply_domain[0];	
+								}else if(attribute.equals("")){
+									System.out.println(attribute);
+									attribute = "unknown";
+								}
+							}else if(name.equals("creative_type")){
+								if(attribute.equals("1|2")){
+									attribute = "1";
+									context.write(new Text(name+"-&-2"),new IntWritable(1));
+								}
 							}
+							context.write(new Text(name+"-&-"+attribute), new IntWritable(1));
+							context.getCounter("TOTALS",name).increment(1);
 						}
-						context.write(new Text(name+"--"+attribute), new IntWritable(1));
-						context.getCounter("TOTALS",name).increment(1);
-					}else{
-						context.write(new Text(name+"."+"empty"), new IntWritable(1));
 					}
+					i++;
 				}
-				i++;
 			}
 		}
 
@@ -122,14 +158,30 @@ public class Frequency2 extends Configured implements Tool {
 				throws IOException, InterruptedException {
 			int i = 0;
 			Iterator<Integer> it = freqFormat.keySet().iterator();
+		
 			while(it.hasNext()){
 				i = it.next();
 				String name = freqFormat.get(i);
 				//获取计数器
 				Counter counter = context.getCounter("TOTALS",name);
+				Counter lines = context.getCounter("LINE_NUM",name);
 				context.write(new Text(name), new IntWritable((int)counter.getValue()));
+				context.write(new Text("LINES"+"-"+name), new IntWritable((int)lines.getValue()));
 			}
 		}	
+	}
+	static class Combine extends Reducer<Text,IntWritable, Text, IntWritable>{
+
+		@Override
+		protected void reduce(Text arg0, Iterable<IntWritable> arg1,Context arg2)
+				throws IOException, InterruptedException {
+			int sum = 0;
+			
+			for(IntWritable val : arg1){
+				sum += val.get();
+			}
+			arg2.write(arg0, new IntWritable(sum));
+		}		
 	}
 	
 	static class FrqReduce extends Reducer<Text, IntWritable, Text, Text>{
@@ -153,18 +205,27 @@ public class Frequency2 extends Configured implements Tool {
 				throws IOException, InterruptedException {
 			String filename;
 			String keyInFile;
-			String date = getDate();
+			String date = "."+context.getConfiguration().get("time", getDate());
 			
-			if(key.toString().contains("--")){ //记录各属性单项值的个数 eg： domain--baidu.com
-				String[] args = key.toString().split("--");
+			if(key.toString().contains("-&-")){ //记录各属性单项值的个数 eg： domain--baidu.com
+				String[] args = key.toString().split("-&-");
 				filename = args[0] + date + FRQ;
-				keyInFile = args[1];
+				if(args.length != 2){
+					System.out.println(key.toString());
+					keyInFile = "empty";
+				}
+				else
+					keyInFile = args[1];
 				context.getCounter(filename, args[0]).increment(1);
 
 			}else if(key.toString().contains(".empty")){ //记录各属性中空白值
 				String[] args = key.toString().split(".empty");
 				filename = args[0] + date + FRQ;
 				keyInFile = key.toString();
+			}else if(key.toString().contains("LINES-")){
+				String[] args = key.toString().split("LINES-");
+				filename = args[1] + date + CNT;
+				keyInFile = "LINES";
 			}else{
 				filename = key.toString() + date + CNT;
 				keyInFile = "TOTALS";
@@ -182,18 +243,12 @@ public class Frequency2 extends Configured implements Tool {
 		protected void cleanup(Context context)
 				throws IOException, InterruptedException {
 			int i = 0;
-//			Cluster cluster = new (context.getConfiguration());
-//			Job job = cluster.getJob(context.getJobID());
-//			Job job = (context.getJobName())
-//			Cluster cluster = new Cluster(context.getConfiguration());
-//			Job job = cluster.getJob(context.getJobID());
-//			System.out.println(job.getJobName());
-//			System.out.println(context.getJobID().toString()+"++++++++++++++++++++");
-			
+			String date = "." + context.getConfiguration().get("time", getDate());
+	
 			Iterator<Integer> it = freqFormat.keySet().iterator();
 			while(it.hasNext()){
 				i = it.next();
-				String filename = freqFormat.get(i)+getDate();
+				String filename = freqFormat.get(i)+date;
 				//获取计数器
 //				if(job == null)
 //					System.out.println("job null");
@@ -215,7 +270,21 @@ public class Frequency2 extends Configured implements Tool {
 		Date d = c.getTime();
 		//String yesterday = "."+c.get(Calendar.YEAR)+(c.get(Calendar.MONTH)+1)+c.get(Calendar.DAY_OF_MONTH);
 		SimpleDateFormat sp = new SimpleDateFormat("yyyyMMdd");
-		String yesterday="."+sp.format(d);
+		String yesterday=sp.format(d);
 		return yesterday;
+	}
+	
+	public static ArrayList<String> splits(String str, String split){
+		int begin = 0;
+		int len = str.length();
+		int end = str.indexOf(split, begin);
+		spl.clear();
+		while(begin != len && -1 != end){
+			spl.add(str.substring(begin, end));
+			begin = end+split.length();
+			end = str.indexOf(split, begin);
+		}
+		spl.add(str.substring(begin, len));
+		return spl;
 	}
 }

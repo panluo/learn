@@ -48,7 +48,7 @@ public class Config {
 				logFormat.put(logformat.nextToken(), pos);
 				pos++;
 			}
-
+			
 			while(frqformat.hasMoreTokens()){
 				String at = frqformat.nextToken();
 				attr.put(logFormat.get(at), at);

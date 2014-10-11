@@ -2,6 +2,7 @@ package bilin_hadoop;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Iterator;
@@ -41,9 +42,10 @@ public class Frequency extends Configured implements Tool{
 	public static final String LIST = "list";
 	public static final String PART = "-r-00000";
 	private static Map<Integer, String> logformat = null;
+	static ArrayList<String> splits = new ArrayList<String>();
 
 	public static void main(String[] args) throws Exception{
-		if(args.length != 2){
+		if(args.length < 2){
 			System.out.println("Usage Frequency <in> <out>");
 			System.exit(2);
 		}
@@ -56,8 +58,14 @@ public class Frequency extends Configured implements Tool{
 		fs.delete(new Path(args[1]),true);
 		
 		//指定配置文件位置
-		String confPath = "hdfs://master.bilintechnology.net:8020/conf/FRE.properties";
-//		String confPath = "conf/FRE.properties";
+		String confPath;
+		if(args.length==3)
+			confPath = args[2];
+		else
+			confPath = "hdfs://namenode.bilintechnology.net:8020/conf/FRE.properties";
+//			confPath = "conf/FRE.properties";
+//			confPath = "hdfs://namenode.bilintechnology.net:8020/user/luo/domain.properties";
+
 		conf.set(LOGTYPE,"freq");
 		conf.set(PATH, confPath);
 		
@@ -66,7 +74,7 @@ public class Frequency extends Configured implements Tool{
 		Job job = new Job(conf,"Frequency");
 		job.setJarByClass(Frequency.class);
 		job.setMapperClass(FqMap.class);
-//		job.setCombinerClass(Combine.class);
+		job.setCombinerClass(Combine.class);
 		job.setReducerClass(FqReduce.class);
 		job.setMapOutputValueClass(IntWritable.class);
 		job.setOutputKeyClass(Text.class);
@@ -88,6 +96,7 @@ public class Frequency extends Configured implements Tool{
 		int i=0;
 		String date = getDate();
 		Iterator<Integer> it = logformat.keySet().iterator();
+
 		while(it.hasNext()){
 			i = it.next();
 			String filename = logformat.get(i)+date;
@@ -140,8 +149,8 @@ public class Frequency extends Configured implements Tool{
 		@Override
 		protected void map(LongWritable key, Text value,Context context)
 				throws IOException, InterruptedException {
-			String values = value.toString().replaceAll("\t\t", "\t \t");
-			StringTokenizer itr = new StringTokenizer(values, "\t");
+//			String values = value.toString().replaceAll("\t\t", "\t \t");
+			StringTokenizer itr = new StringTokenizer(value.toString(), "\t");
 			
 			int i = 0;
 			if(itr.hasMoreTokens()){
@@ -153,16 +162,29 @@ public class Frequency extends Configured implements Tool{
 				if(logformat.get(i)!=null){
 					String attribute = logformat.get(i);
 				
-					if(tmp.equals(" ")){
+					if(tmp.equals(" ") || tmp.equals("")){
 						context.write(new Text(attribute+"."+EMPTY), new IntWritable(1));
 					}else{
-						if(attribute.equals("referer")){
+						if(attribute.equals("referer") || attribute.equals("domain")){
 							String[] domain = tmp.split("/");
-							if(domain.length>=3)
-								tmp = domain[2];
+							if(domain.length>=3){
+								String[] simply_domain=domain[2].split("www.");
+								if(simply_domain.length>= 2)
+									tmp = simply_domain[1];
+								else
+									tmp = simply_domain[0];
+							}else if(tmp.equals("")){
+								System.out.println(tmp);
+								tmp="unknown";
+							}
+//							System.out.println(attribute+tmp);
+						}else if(attribute.equals("creative_type")){
+							if(tmp.equals("1|2")){
+								attribute = "1";
+								context.write(new Text(attribute+"-&-2"), new IntWritable(1));
+							}
 						}
-						
-						context.write(new Text(attribute + "--" + tmp), new IntWritable(1));
+						context.write(new Text(attribute + "-&-" + tmp), new IntWritable(1));
 						context.write(new Text(attribute), new IntWritable(1));
 					}
 				}
@@ -207,8 +229,8 @@ public class Frequency extends Configured implements Tool{
 			String keyInFile;
 			String date = getDate();
 			
-			if(key.toString().contains("--")){ //记录各属性单项值的个数 eg： domain--baidu.com
-				String[] args = key.toString().split("--");
+			if(key.toString().contains("-&-")){ //记录各属性单项值的个数 eg： domain--baidu.com
+				String[] args = key.toString().split("-&-");
 				filename = args[0] + date + FRQ;
 				keyInFile = args[1];
 				context.getCounter(filename, args[0]).increment(1);
@@ -235,5 +257,18 @@ public class Frequency extends Configured implements Tool{
 				throws IOException, InterruptedException {
 			multipleOutputs.close();
 		}
+	}
+	public static ArrayList<String> splits(String str, String split){
+		int begin = 0;
+		int len = str.length();
+		int end = str.indexOf(split, begin);
+		splits.clear();
+		while(begin != len && -1 != end){
+			splits.add(str.substring(begin, end));
+			begin = end+split.length();
+			end = str.indexOf(split, begin);
+		}
+		splits.add(str.substring(begin, len));
+		return splits;
 	}
 }
