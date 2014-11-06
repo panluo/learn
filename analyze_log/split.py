@@ -16,13 +16,18 @@ def split_log(inputPath,outputPath,items,keyinfo,length):
             if len(tmp)==length+1:
                 hours = int(tmp[keyinfo["time"]])/3600 
                 for i in items.keys():
-                    key = "%s|%s|%s|%s|%s"%(items[i],tmp[keyinfo["campaign_id"]],tmp[keyinfo["lineitem"]],tmp[i+1],hours)
-                    if not tmp[keyinfo["exchange_user_id"]].strip():
-                            user_id = "unknow"
+                    key = "%s|%s|%s|%s|%s|%s"%(items[i],tmp[keyinfo["ad_exchange"]],tmp[keyinfo["campaign_id"]],tmp[keyinfo["lineitem"]],tmp[i+1],hours)
+                    if not tmp[keyinfo["bilin_user_id"]].strip():
+                            user_id = "unknown"
                     else:
-                        user_id = tmp[keyinfo["exchange_user_id"]]
+                        user_id = tmp[keyinfo["bilin_user_id"]]
 
-                        out.write("%s\t%s\t%s\t%s\n"%(key,'1',tmp[keyinfo["win_price"]],user_id))
+                    if tmp[keyinfo["win_price"]]=="nil" or tmp[keyinfo["win_price"]] is None:
+                        price = 0
+                    else:
+                        price = tmp[keyinfo["win_price"]]
+
+                    out.write("%s\t%s\t%s\t%s\n"%(key,'1',price,user_id))
 
     finally:
         fs.close()
@@ -44,7 +49,7 @@ def split_toge(path, outputPath, items, keyinfo, length,logtype):
                     hours = int(tmp[keyinfo["time"]])/3600
                     for i in items.keys():
                        # print items[i]+tmp[i+1]+"\t"+"1"+"\n"
-                        key = "%s|%s|%s|%s|%s"%(items[i],tmp[keyinfo["campaign_id"]],tmp[keyinfo["lineitem"]],tmp[i+1],hours)
+                        key = "%s|%s|%s|%s|%s|%s"%(items[i],tmp[keyinfo["ad_exchange"]],tmp[keyinfo["campaign_id"]],tmp[keyinfo["lineitem"]],tmp[i+1],hours)
 
                         if logtype == "bid":
                             bid_price = int(tmp[keyinfo["bid_price"]])
@@ -75,7 +80,7 @@ def split_toge(path, outputPath, items, keyinfo, length,logtype):
         fs.close()
 
 def load_conf(logtype):
-    path = "/yundisk/luopan/conf.txt"
+    path = "/yundisk/luopan/logProcess/conf.txt"
     theline = linecache.getline(path,LOGTYPE[logtype])
     usefull = linecache.getline(path,5)
 #    print theline
@@ -84,7 +89,7 @@ def load_conf(logtype):
     useline = usefull.strip("\n").split(",")
     keyinfo = {}
     for i in range(len(line)):
-        if line[i] == "campaign_id" or line[i] == "lineitem" or line[i] == "time" or line[i] == "bid_price" or line[i] == "exchange_user_id" or line[i] == "win_price":
+        if line[i] == "campaign_id" or line[i] == "lineitem" or line[i] == "time" or line[i] == "bid_price" or line[i] == "bilin_user_id" or line[i] == "win_price" or line[i]=="ad_exchange":
             keyinfo[line[i]] = i+1
 
     dictions = {}
@@ -97,8 +102,7 @@ def load_conf(logtype):
     
     return dictions,keyinfo,len(line)
 
-def main(inputPath, outputPath = "/tmp/logProcess_result.txt", logType):
-    
+def main(inputPath, outputPath, logType):
     dictions,keyinfo,length = load_conf(logType)
     if logType == "win":
 	print "win type"
@@ -115,9 +119,6 @@ if __name__ == "__main__":
     inputPath = sys.argv[1]
     outputPath = sys.argv[2]
     logType = sys.argv[3]
-    if LOGTPYE.has_key(logType):
-        print inputPath+"--"+outputPath+"--"+logType
-        main(inputPath, outputPath, logType)
-    else:
-        print "input element error with logType : %s"%logType
+    print inputPath+"--"+outputPath+"--"+logType
+    main(inputPath, outputPath, logType)
 

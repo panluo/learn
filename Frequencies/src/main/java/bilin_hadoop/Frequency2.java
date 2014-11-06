@@ -8,7 +8,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -39,12 +39,10 @@ enum Process_time {
 
 public class Frequency2 extends Configured implements Tool {
 
-	private static final String LOGTYPE = "logtype";
 	private static final String PATH = "confPath";
 	private static final String SPLIT = "\t";
 	private static final String FRQ = ".frq";
 	private static final String CNT = ".cnt";
-	private static Map<Integer, String> freqFormat = null;
 	private static Map<String, Integer> reqFormat = null;
 	static ArrayList<String> spl = new ArrayList<String>();
 	private static IntWritable ONE = new IntWritable(1);
@@ -72,15 +70,11 @@ public class Frequency2 extends Configured implements Tool {
 			datetime=args[4];
 			conf.set("time", datetime);
 		}
-		conf.set(LOGTYPE, "freq");
 		conf.set(PATH, confPath);
-
-		
+	
 		FileSystem fs = FileSystem.get(conf);
 		fs.delete(new Path(args[1]), true);
 		
-//		@SuppressWarnings("deprecation")
-//		Job job = new Job(conf,"Frequency2");
 		Job job = Job.getInstance(conf, "Frequency2");
 		job.setJarByClass(Frequency2.class);
 		job.setMapperClass(FrqMap.class);
@@ -123,16 +117,18 @@ public class Frequency2 extends Configured implements Tool {
 	}
 	
 	public static class FrqMap extends Mapper<LongWritable, Text, Text, IntWritable>{
-
-		static private Set<String> Exchanges = new HashSet<String>();
+		static Map<String,Map<Integer,String>> tmp = new HashMap<String,Map<Integer,String>>();
+		static Map<Integer, String> freq = null;
+		static Set<String> excs = null;
 		@Override
 		protected void setup(Context context)
 				throws IOException, InterruptedException {
 			try{
 				Configuration conf = context.getConfiguration();
-				Config.getInstance().loadConfig(conf.get(LOGTYPE),conf.get(PATH));
-				freqFormat = Config.getInstance().getFreqFormat();
+				Config.getInstance().loadConfig(conf.get(PATH));
 				reqFormat = Config.getInstance().getLogFormatMap();
+				tmp = Config.getInstance().getFreqMap();
+				excs =  Config.getInstance().getExchanges();
 				URI[] localCacheFile = context.getCacheFiles();                //get ip to geo code file china.csv and loading
 		        FileSystem fs = FileSystem.get(localCacheFile[0], new Configuration());
 		        IpToGeo.loadGeoFile(localCacheFile[0].toString(),fs);
@@ -147,60 +143,59 @@ public class Frequency2 extends Configured implements Tool {
 				throws IOException, InterruptedException {
 
 			ArrayList<String> str = splits(value.toString(),SPLIT);
-			if(str.size()!= Config.getInstance().getLogFormatMap().size()){
+			int len = Config.getInstance().getLogFormatMap().size();
+			if(str.size()!= len && str.size() != len+3 && str.size()+2 != len){
 				System.out.println("number of split : "+ str.size() + 
-						"number of format : " + Config.getInstance().getLogFormatMap().size());
+						" number of format : " + len);
 				System.out.println("the line :" +value.toString());
 				context.getCounter("Error_log", "count").increment(1);
 			}
 			else{
 				String exchange = str.get(reqFormat.get("ad_exchange"));
-				if(!exchange.isEmpty())
-					Exchanges.add(exchange);
 				
-				int i=0;
-				double process_time = 0.0;
-				context.getCounter("LINE_NUM", "Total").increment(1);
-				for(String attribute : str){
-					if(reqFormat.get("process_time")==i){
-						process_time = Double.valueOf(attribute).doubleValue();
-						if(process_time < 30)
-							context.getCounter("process_time",Process_time.time00_30.toString()).increment(1);
-						else if(process_time >=30 && process_time < 60)
-							context.getCounter("process_time",Process_time.time30_60.toString()).increment(1);
-						else if(process_time >=60 && process_time < 90)
-							context.getCounter("process_time",Process_time.time60_90.toString()).increment(1);
-						else if(process_time >= 90)
-							context.getCounter("process_time",Process_time.time90_00.toString()).increment(1);
-					}
-					if(freqFormat.get(i) != null){
-						String name = freqFormat.get(i);
+				if(!excs.contains(exchange)){
+					System.out.println(str.toString());
+					context.getCounter("Error_log", "WithOutExchange").increment(1);
+				}
+				else{
+					freq = tmp.get(exchange);
+
+//				double process_time = 0.0;
+//				process_time = Double.valueOf(str.get(reqFormat.get("process_time"))).doubleValue();
+//				if(process_time < 30)
+//					context.getCounter("process_time",Process_time.time00_30.toString()).increment(1);
+//				else if(process_time >=30 && process_time < 60)
+//					context.getCounter("process_time",Process_time.time30_60.toString()).increment(1);
+//				else if(process_time >=60 && process_time < 90)
+//					context.getCounter("process_time",Process_time.time60_90.toString()).increment(1);
+//				else if(process_time >= 90)
+//					context.getCounter("process_time",Process_time.time90_00.toString()).increment(1);
+//				
+					int i=0;
+					context.getCounter("LINE_NUM", "Total").increment(1);
+					for(Iterator<Integer> at = freq.keySet().iterator();at.hasNext();){
+						i = at.next();
+						String name = freq.get(i);
 						String fulname = exchange + "_" + name;
+						String attribute = str.get(i);
 						if(attribute.equals(" ") || attribute.equals("")){
 							context.write(new Text(fulname+"."+"empty"), ONE);
 						}else{
-									
 							if(name.equals("domain") || name.equals("referer")){
-
 								String result = null;
 								StringTokenizer domain = new StringTokenizer(attribute,"/");
 								if(domain.countTokens()>=2){
 									domain.nextToken();
 									result = domain.nextToken();
-									if(result.contains("www."))
+									if(result.startsWith("www."))
 										attribute = result.substring(4);
 									else
 										attribute = result;
 								}
 								context.write(new Text(fulname+"-&-"+attribute), ONE);
 							}else if(name.equals("creative_type")){
-//								if(attribute.equals("1|2")){
-//									attribute = "1";
-//									context.write(new Text(name+"-&-2"),new IntWritable(1));
-//								}
 								if(attribute.contains("|")){
-									StringTokenizer type = new StringTokenizer(attribute,"\\|");
-									while(type.hasMoreTokens())
+									StringTokenizer type = new StringTokenizer(attribute,"\\|");									while(type.hasMoreTokens())
 										context.write(new Text(fulname+"-&-"+type.nextToken()), ONE);
 								}else
 									context.write(new Text(fulname+"-&-"+attribute), ONE);
@@ -214,7 +209,6 @@ public class Frequency2 extends Configured implements Tool {
 							context.getCounter("TOTALS",fulname).increment(1);
 						}
 					}
-					i++;
 				}
 			}
 		}
@@ -223,27 +217,22 @@ public class Frequency2 extends Configured implements Tool {
 		protected void cleanup(
 				Mapper<LongWritable, Text, Text, IntWritable>.Context context)
 				throws IOException, InterruptedException {
-			int i = 0;
-			Iterator<Integer> it = freqFormat.keySet().iterator();
-			Counter counter;
-			while(it.hasNext()){
-				i = it.next();
-				String name = freqFormat.get(i);
-				for(Iterator<String> exc = Exchanges.iterator();exc.hasNext();){
-					
-					String fulname = exc.next()+"_"+name;
-							//获取计数器
+			for(String exc : excs){
+				Map<Integer,String> freq_exc = tmp.get(exc); 
+				int i = 0;
+				Iterator<Integer> it = freq_exc.keySet().iterator();
+				Counter counter;
+				while(it.hasNext()){
+					i = it.next();
+					String name = freq_exc.get(i);
+					String fulname = exc+"_"+name;
 					counter = context.getCounter("TOTALS",fulname);
+					
 					context.write(new Text(fulname), new IntWritable((int)counter.getValue()));
 					Counter lines = context.getCounter("LINE_NUM","Total");
 					context.write(new Text("LINES-"+fulname), new IntWritable((int)lines.getValue()));
 				}
 			}
-//			for(Process_time val : Process_time.values()){
-//				counter = context.getCounter("process_time",val.name());
-//				System.out.println(counter.getValue());
-//				context.write(new Text("Process-&-"+val.name()), new IntWritable((int)counter.getValue()));
-//			}	
 		}	
 	}
 	static class Combine extends Reducer<Text,IntWritable, Text, IntWritable>{
@@ -262,6 +251,7 @@ public class Frequency2 extends Configured implements Tool {
 	
 	static class FrqReduce extends Reducer<Text, IntWritable, Text, Text>{
 		
+		static Map<String,Map<Integer,String>> tmp = new HashMap<String,Map<Integer,String>>();
 		private MultipleOutputs<Text, Text> multipleOutputs;
 		@Override
 		protected void setup(Context context)
@@ -269,13 +259,13 @@ public class Frequency2 extends Configured implements Tool {
 			multipleOutputs = new MultipleOutputs<Text, Text>(context);
 			try{
 				Configuration conf = context.getConfiguration();
-				Config.getInstance().loadConfig(conf.get(LOGTYPE),conf.get(PATH));
-				freqFormat = Config.getInstance().getFreqFormat();
+				Config.getInstance().loadConfig(conf.get(PATH));
+				tmp = Config.getInstance().getFreqMap();
 			}catch(Exception e){
 				e.printStackTrace();
 			}
 		}
-
+		
 		@Override
 		protected void reduce(Text key, Iterable<IntWritable> value, Context context)
 				throws IOException, InterruptedException {
@@ -294,12 +284,10 @@ public class Frequency2 extends Configured implements Tool {
 					keyInFile = args[1];
 
 			}else if(key.toString().contains(".empty")){ //记录各属性中空白值
-//				String[] args = key.toString().split(".empty");
 				int len = key.toString().length();
 				filename = key.toString().substring(0,len-6) + date + FRQ;
 				keyInFile = key.toString();
 			}else if(key.toString().contains("LINES-")){
-//				String[] args = key.toString().split("LINES-");
 				filename = key.toString().substring(6) + date + CNT;
 				keyInFile = "LINES";
 			}else{
@@ -318,32 +306,25 @@ public class Frequency2 extends Configured implements Tool {
 		@Override
 		protected void cleanup(Context context)
 				throws IOException, InterruptedException {
-			int i = 0;
-			Set<String> excs = FrqMap.Exchanges;
+
+			Set<String> excs = Config.getInstance().getExchanges();
 			String date = "." + context.getConfiguration().get("time", getDate());
 			Counter counter;
-			Iterator<Integer> it = freqFormat.keySet().iterator();
-			while(it.hasNext()){
-				i = it.next();
-				for(Iterator<String> exc = excs.iterator();exc.hasNext();){	
-					String filename = exc.next()+"_"+freqFormat.get(i)+date;
-				//获取计数器
-//				if(job == null)
-//					System.out.println("job null");
-//				else{
-//				Counter totalcounter = job.getCounters().findCounter("TOTALS", "domain");//freqFormat.get(i));
-//				multipleOutputs.write(new Text("TOTALS"), new Text(totalcounter.getValue()+""), filename+CNT);
-				
+
+			for(String ex : excs){
+				Map<Integer,String> freq = tmp.get(ex);
+				for(Iterator<Integer> iter = freq.keySet().iterator();iter.hasNext();){	
+					String filename = ex+"_"+freq.get(iter.next())+date;
 					counter = context.getCounter("org.apache.hadoop.mapreduce.lib.output.MultipleOutputs", filename+FRQ);
 					multipleOutputs.write(new Text("KINDS"), new Text(counter.getValue()+""), filename+CNT);
 				}
+				
 			}
-			for(Iterator<String> exc = excs.iterator();exc.hasNext();){
-				String filename = exc.next()+"_GEO"+date;
-				counter = context.getCounter("org.apache.hadoop.mapreduce.lib.output.MultipleOutputs", filename+FRQ);
-				multipleOutputs.write(new Text("KINDS"), new Text(counter.getValue()+""), filename+CNT);
+			for(String ex : excs){
+				String filename_geo = ex+"_GEO"+date;
+				counter = context.getCounter("org.apache.hadoop.mapreduce.lib.output.MultipleOutputs", filename_geo+FRQ);
+				multipleOutputs.write(new Text("KINDS"), new Text(counter.getValue()+""), filename_geo+CNT);
 			}
-
 			multipleOutputs.close();
 		}
 		

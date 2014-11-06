@@ -91,8 +91,8 @@ public class Frequency extends Configured implements Tool{
 		conf.setBoolean("dfs.support.append", true);
 		Counters counter = job.getCounters();
 		//加载配置文件用以获得计数器名
-		Config.getInstance().loadConfig(conf.get(LOGTYPE), conf.get(PATH));
-		logformat = Config.getInstance().getFreqFormat();
+		Config.getInstance().loadConfig(conf.get(PATH));
+		logformat = Config.getInstance().getFreqFormat("baidu");
 		int i=0;
 		String date = getDate();
 		Iterator<Integer> it = logformat.keySet().iterator();
@@ -139,11 +139,11 @@ public class Frequency extends Configured implements Tool{
 				throws IOException, InterruptedException {
 			try {
 				//加载配置文件
-				Config.getInstance().loadConfig(context.getConfiguration().get(LOGTYPE), context.getConfiguration().get(PATH));
+				Config.getInstance().loadConfig(context.getConfiguration().get(PATH));
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
-			logformat = Config.getInstance().getFreqFormat();
+			logformat = Config.getInstance().getFreqFormat("baidu");
 		}
 
 		@Override
