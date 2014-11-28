@@ -20,7 +20,6 @@ public class Config {
 	private static Config config;
 	private static Map<String, Map<Integer,String>> tmp = new HashMap<String, Map<Integer,String>>();
 	private static Set<String> exchanges = new HashSet<String>();
-	//private String logType;
 	/*
 	 * 初始化方法
 	 * 已经被初始化过的对象将不会再次初始化
@@ -50,7 +49,6 @@ public class Config {
 				logFormat.put(logformat.nextToken(), pos);
 				pos++;
 			}
-			
 			while(excs.hasMoreTokens()){
 				exchanges.add(excs.nextToken());
 			}

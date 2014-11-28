@@ -1,9 +1,7 @@
 package bilin_hadoop;
 
-import ip.IpToGeo;
 
 import java.io.IOException;
-import java.net.URI;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -13,14 +11,13 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.StringTokenizer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.IOUtils;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Counter;
@@ -33,9 +30,6 @@ import org.apache.hadoop.mapreduce.lib.output.MultipleOutputs;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
-enum Process_time {
-	time00_30,time30_60,time60_90,time90_00;
-}
 
 public class Frequency2 extends Configured implements Tool {
 
@@ -45,7 +39,7 @@ public class Frequency2 extends Configured implements Tool {
 	private static final String CNT = ".cnt";
 	private static Map<String, Integer> reqFormat = null;
 	static ArrayList<String> spl = new ArrayList<String>();
-	private static IntWritable ONE = new IntWritable(1);
+	private static LongWritable ONE = new LongWritable(1);
 	
 	@Override
 	public int run(String[] args) throws Exception {
@@ -53,7 +47,7 @@ public class Frequency2 extends Configured implements Tool {
 		Configuration conf = new Configuration();
 
 		String confPath;
-		String geoPath;
+//		String geoPath;
 		String datetime;
 		if(args.length >= 3 && args[2]!=" ")
 			confPath = args[2];
@@ -61,50 +55,38 @@ public class Frequency2 extends Configured implements Tool {
 			confPath = "conf/FRE.properties";
 //			confPath = "hdfs://namenode.bilintechnology.net:8020/conf/FRE.properties";
 //			confPath = "hdfs://namenode.bilintechnology.net:8020/user/luo/domain.properties";
-		if(args.length >=4 && args[3]!=" ")
-			geoPath=args[3];
-		else
-			geoPath="hdfs://namenode.bilintechnology.net:8020/user/bilinhadoop/ip_geo/china.csv";
+//		if(args.length >=4 && args[3]!=" ")
+//			geoPath=args[3];
+//		else
+//			geoPath="hdfs://namenode.bilintechnology.net:8020/user/bilinhadoop/ip_geo/china.csv";
 		
-		if(args.length==5){
-			datetime=args[4];
+		if(args.length==4){
+			datetime=args[3];
 			conf.set("time", datetime);
 		}
 		conf.set(PATH, confPath);
-	
+		
 		FileSystem fs = FileSystem.get(conf);
 		fs.delete(new Path(args[1]), true);
+		conf.set("mapreduce.job.counters.limit", "200");
+		Job job = Job.getInstance(conf, "Frequency");
 		
-		Job job = Job.getInstance(conf, "Frequency2");
 		job.setJarByClass(Frequency2.class);
 		job.setMapperClass(FrqMap.class);
 		job.setCombinerClass(Combine.class);
 		job.setReducerClass(FrqReduce.class);
 		job.setOutputKeyClass(Text.class);
 		job.setOutputValueClass(Text.class);
-		job.setMapOutputValueClass(IntWritable.class);
+		job.setMapOutputValueClass(LongWritable.class);
 //		job.setNumReduceTasks(1);
 	
 		FileInputFormat.addInputPath(job, new Path(args[0]));
 		FileOutputFormat.setOutputPath(job, new Path(args[1]));
 		
-		job.addCacheFile(URI.create(geoPath));
+//		job.addCacheFile(URI.create(geoPath));
 		//Important
 		MultipleOutputs.setCountersEnabled(job, true);
 		job.waitForCompletion(true);
-		String filename = "ProcessTime";
-		Path filePath = new Path(args[1],filename);
-		FSDataOutputStream out = fs.create(filePath);
-		String bt = "";
-		Counter counter;
-		for(Process_time val : Process_time.values()){
-			counter = job.getCounters().findCounter("process_time", val.name());
-			bt = bt + val.name() + "\t" + counter.getValue() + "\n";
-		}
-		counter = job.getCounters().findCounter("LINE_NUM", "Total");
-		bt = bt + "LINES\t" + counter.getValue() + "\n";
-		out.write(bt.getBytes());
-		IOUtils.closeStream(out);
 		return 0;
 	}
 
@@ -116,7 +98,7 @@ public class Frequency2 extends Configured implements Tool {
 		ToolRunner.run(new Frequency2(), args);
 	}
 	
-	public static class FrqMap extends Mapper<LongWritable, Text, Text, IntWritable>{
+	public static class FrqMap extends Mapper<LongWritable, Text, Text, LongWritable>{
 		static Map<String,Map<Integer,String>> tmp = new HashMap<String,Map<Integer,String>>();
 		static Map<Integer, String> freq = null;
 		static Set<String> excs = null;
@@ -129,9 +111,9 @@ public class Frequency2 extends Configured implements Tool {
 				reqFormat = Config.getInstance().getLogFormatMap();
 				tmp = Config.getInstance().getFreqMap();
 				excs =  Config.getInstance().getExchanges();
-				URI[] localCacheFile = context.getCacheFiles();                //get ip to geo code file china.csv and loading
-		        FileSystem fs = FileSystem.get(localCacheFile[0], new Configuration());
-		        IpToGeo.loadGeoFile(localCacheFile[0].toString(),fs);
+//				URI[] localCacheFile = context.getCacheFiles();                //get ip to geo code file china.csv and loading
+//		        FileSystem fs = FileSystem.get(localCacheFile[0], new Configuration());
+//		        IpToGeo.loadGeoFile(localCacheFile[0].toString(),fs);
 			}catch(Exception e){
 				e.printStackTrace();
 			}
@@ -139,12 +121,12 @@ public class Frequency2 extends Configured implements Tool {
 
 		@Override
 		protected void map(LongWritable key, Text value,
-				Mapper<LongWritable, Text, Text, IntWritable>.Context context)
+				Mapper<LongWritable, Text, Text, LongWritable>.Context context)
 				throws IOException, InterruptedException {
 
 			ArrayList<String> str = splits(value.toString(),SPLIT);
 			int len = Config.getInstance().getLogFormatMap().size();
-			if(str.size()!= len && str.size() != len+3 && str.size()+2 != len){
+			if(str.size() < len || str.size()+1 < len){
 				System.out.println("number of split : "+ str.size() + 
 						" number of format : " + len);
 				System.out.println("the line :" +value.toString());
@@ -152,61 +134,59 @@ public class Frequency2 extends Configured implements Tool {
 			}
 			else{
 				String exchange = str.get(reqFormat.get("ad_exchange"));
-				
-				if(!excs.contains(exchange)){
-					System.out.println(str.toString());
-					context.getCounter("Error_log", "WithOutExchange").increment(1);
-				}
-				else{
-					freq = tmp.get(exchange);
 
-//				double process_time = 0.0;
-//				process_time = Double.valueOf(str.get(reqFormat.get("process_time"))).doubleValue();
-//				if(process_time < 30)
-//					context.getCounter("process_time",Process_time.time00_30.toString()).increment(1);
-//				else if(process_time >=30 && process_time < 60)
-//					context.getCounter("process_time",Process_time.time30_60.toString()).increment(1);
-//				else if(process_time >=60 && process_time < 90)
-//					context.getCounter("process_time",Process_time.time60_90.toString()).increment(1);
-//				else if(process_time >= 90)
-//					context.getCounter("process_time",Process_time.time90_00.toString()).increment(1);
-//				
+				if(!excs.contains(exchange)){
+					System.out.println(value.toString());
+					context.getCounter("Error_log", "WithOutExchange").increment(1);
+				}else{
+					
+					freq = tmp.get(exchange);
+					String first_name = exchange;
+					String ssp = "";
+					if(exchange.equals("bidswitch")){
+						ssp = str.get(reqFormat.get("ssp"));
+//						System.out.println(first_name);
+					}
+					String ssp_name;
+					if(ssp.isEmpty()){
+						ssp_name="";
+					}else{
+						ssp_name=ssp + "\t";
+						context.write(new Text("bidswitch++"+ssp), ONE);
+					}
+
+					context.getCounter("LINE_NUM", first_name).increment(1);
 					int i=0;
-					context.getCounter("LINE_NUM", "Total").increment(1);
 					for(Iterator<Integer> at = freq.keySet().iterator();at.hasNext();){
 						i = at.next();
 						String name = freq.get(i);
-						String fulname = exchange + "_" + name;
+						String fulname = first_name + "." + name;
 						String attribute = str.get(i);
+						
 						if(attribute.equals(" ") || attribute.equals("")){
-							context.write(new Text(fulname+"."+"empty"), ONE);
+							context.write(new Text(fulname+"."+ssp_name+"empty"), ONE);
 						}else{
-							if(name.equals("domain") || name.equals("referer")){
-								String result = null;
-								StringTokenizer domain = new StringTokenizer(attribute,"/");
-								if(domain.countTokens()>=2){
-									domain.nextToken();
-									result = domain.nextToken();
-									if(result.startsWith("www."))
-										attribute = result.substring(4);
-									else
-										attribute = result;
-								}
-								context.write(new Text(fulname+"-&-"+attribute), ONE);
+							if(name.equals("url") || name.equals("referer")){
+								String result = ssp_name+getDomain(attribute);
+								context.write(new Text(first_name+".domain"+"-&-"+result), ONE);
+							
 							}else if(name.equals("creative_type")){
 								if(attribute.contains("|")){
-									StringTokenizer type = new StringTokenizer(attribute,"\\|");									while(type.hasMoreTokens())
-										context.write(new Text(fulname+"-&-"+type.nextToken()), ONE);
+									StringTokenizer type = new StringTokenizer(attribute,"\\|");
+									while(type.hasMoreTokens())
+										context.write(new Text(fulname+"-&-"+ssp_name+type.nextToken()), ONE);
 								}else
-									context.write(new Text(fulname+"-&-"+attribute), ONE);
-							}else if(name.equals("user_ip")){
-								context.write(new Text(fulname+"-&-"+attribute), ONE);
-								String geoinfo = IpToGeo.getGeo(attribute);
-								context.write(new Text(exchange+"_GEO-&-"+geoinfo),ONE);
+									context.write(new Text(fulname+"-&-"+ssp_name+attribute), ONE);
+							}else if(name.equals("geo") && exchange.equals("bidswitch")){
+								String city = attribute.substring(0, attribute.lastIndexOf("|"));
+								context.write(new Text(fulname+"-&-"+ssp_name+city), ONE);
 							}else{
-								context.write(new Text(fulname+"-&-"+attribute), ONE);
+								context.write(new Text(fulname+"-&-"+ssp_name+attribute), ONE);
 							}
-							context.getCounter("TOTALS",fulname).increment(1);
+//							context.write(new Text(fulname), ONE);
+//							if(name.equals("url"))
+//								name = "domain";
+//							context.write(new Text("bidswitch++".concat(ssp+".").concat(name)), ONE);
 						}
 					}
 				}
@@ -215,41 +195,40 @@ public class Frequency2 extends Configured implements Tool {
 
 		@Override
 		protected void cleanup(
-				Mapper<LongWritable, Text, Text, IntWritable>.Context context)
+				Mapper<LongWritable, Text, Text, LongWritable>.Context context)
 				throws IOException, InterruptedException {
+			String name = "";
 			for(String exc : excs){
 				Map<Integer,String> freq_exc = tmp.get(exc); 
 				int i = 0;
 				Iterator<Integer> it = freq_exc.keySet().iterator();
-				Counter counter;
+				Counter lines = context.getCounter("LINE_NUM",exc);
 				while(it.hasNext()){
 					i = it.next();
-					String name = freq_exc.get(i);
-					String fulname = exc+"_"+name;
-					counter = context.getCounter("TOTALS",fulname);
-					
-					context.write(new Text(fulname), new IntWritable((int)counter.getValue()));
-					Counter lines = context.getCounter("LINE_NUM","Total");
-					context.write(new Text("LINES-"+fulname), new IntWritable((int)lines.getValue()));
+					name = exc+"."+freq_exc.get(i);
+					if(freq_exc.get(i).equals("url"))
+						name = exc.concat(".").concat("domain");
+					if(lines.getValue()!=0)
+						context.write(new Text("LINES-"+name), new LongWritable(lines.getValue()));
 				}
 			}
 		}	
 	}
-	static class Combine extends Reducer<Text,IntWritable, Text, IntWritable>{
+	static class Combine extends Reducer<Text,LongWritable, Text, LongWritable>{
 
 		@Override
-		protected void reduce(Text arg0, Iterable<IntWritable> arg1,Context arg2)
+		protected void reduce(Text arg0, Iterable<LongWritable> arg1,Context arg2)
 				throws IOException, InterruptedException {
 			int sum = 0;
 			
-			for(IntWritable val : arg1){
+			for(LongWritable val : arg1){
 				sum += val.get();
 			}
-			arg2.write(arg0, new IntWritable(sum));
+			arg2.write(arg0, new LongWritable(sum));
 		}		
 	}
 	
-	static class FrqReduce extends Reducer<Text, IntWritable, Text, Text>{
+	static class FrqReduce extends Reducer<Text, LongWritable, Text, Text>{
 		
 		static Map<String,Map<Integer,String>> tmp = new HashMap<String,Map<Integer,String>>();
 		private MultipleOutputs<Text, Text> multipleOutputs;
@@ -267,11 +246,16 @@ public class Frequency2 extends Configured implements Tool {
 		}
 		
 		@Override
-		protected void reduce(Text key, Iterable<IntWritable> value, Context context)
+		protected void reduce(Text key, Iterable<LongWritable> value, Context context)
 				throws IOException, InterruptedException {
-			String filename;
-			String keyInFile;
+			String filename = "";
+			String keyInFile = "";
 			String date = "."+context.getConfiguration().get("time", getDate());
+			
+			int sum = 0;
+			for(LongWritable val : value){
+				sum += val.get();
+			}
 			
 			if(key.toString().contains("-&-")){ //记录各属性单项值的个数 eg： domain-&-baidu.com
 				String[] args = key.toString().split("-&-");
@@ -283,48 +267,45 @@ public class Frequency2 extends Configured implements Tool {
 				else
 					keyInFile = args[1];
 
-			}else if(key.toString().contains(".empty")){ //记录各属性中空白值
-				int len = key.toString().length();
-				filename = key.toString().substring(0,len-6) + date + FRQ;
-				keyInFile = key.toString();
+			}else if(key.toString().contains("empty")){ //记录各属性中空白值
+				String keyy = key.toString();
+				filename = keyy.substring(0,keyy.lastIndexOf("."))+ date + FRQ;
+				if(keyy.contains("\t"))
+					keyInFile = keyy.substring(keyy.lastIndexOf(".")+1);
+				else
+					keyInFile = keyy.substring(keyy.indexOf(".")+1);
 			}else if(key.toString().contains("LINES-")){
 				filename = key.toString().substring(6) + date + CNT;
-				keyInFile = "LINES";
-			}else{
-				filename = key.toString() + date + CNT;
-				keyInFile = "TOTALS";
+				keyInFile = key.toString().substring(6,key.toString().indexOf("."))+"\tLINES";
+			}else if(key.toString().contains("bidswitch++")){
+				Map<Integer,String> bidswitch = tmp.get("bidswitch");
+				String item;
+				for(Iterator<Integer> it = bidswitch.keySet().iterator();it.hasNext();){
+					item = bidswitch.get(it.next());
+					if(item.equals("url"))
+						item = "domain";
+					String name = "bidswitch".concat("."+item+date+CNT);
+					multipleOutputs.write(new Text(key.toString().substring(11)+"\tLINES"), new Text(sum+""), name);
+				}
+				filename=keyInFile="";
+//				filename = "bidswitch.".concat(key.toString().substring(key.toString().lastIndexOf(".")+1))+date+CNT;
+//				keyInFile = key.toString().substring(11,key.toString().lastIndexOf("."));
+//			}else{
+//				filename = key.toString() + date + CNT;
+//				if(filename.contains("url")){
+//					filename = filename.replaceAll("url", "domain");
+//				}
+//				keyInFile = "TOTALS";
 			}
-			int sum = 0;
-			for(IntWritable val : value){
-				sum += val.get();
-			}
-			
+//			
 			// 以文件形式输出
-			multipleOutputs.write(new Text(keyInFile), new Text(sum+""), filename);
+			if(!filename.isEmpty())
+				multipleOutputs.write(new Text(keyInFile), new Text(sum+""), filename);
 		}
 
 		@Override
 		protected void cleanup(Context context)
 				throws IOException, InterruptedException {
-
-			Set<String> excs = Config.getInstance().getExchanges();
-			String date = "." + context.getConfiguration().get("time", getDate());
-			Counter counter;
-
-			for(String ex : excs){
-				Map<Integer,String> freq = tmp.get(ex);
-				for(Iterator<Integer> iter = freq.keySet().iterator();iter.hasNext();){	
-					String filename = ex+"_"+freq.get(iter.next())+date;
-					counter = context.getCounter("org.apache.hadoop.mapreduce.lib.output.MultipleOutputs", filename+FRQ);
-					multipleOutputs.write(new Text("KINDS"), new Text(counter.getValue()+""), filename+CNT);
-				}
-				
-			}
-			for(String ex : excs){
-				String filename_geo = ex+"_GEO"+date;
-				counter = context.getCounter("org.apache.hadoop.mapreduce.lib.output.MultipleOutputs", filename_geo+FRQ);
-				multipleOutputs.write(new Text("KINDS"), new Text(counter.getValue()+""), filename_geo+CNT);
-			}
 			multipleOutputs.close();
 		}
 		
@@ -352,5 +333,20 @@ public class Frequency2 extends Configured implements Tool {
 		}
 		spl.add(str.substring(begin, len));
 		return spl;
+	}
+
+	public static String getDomain(String url){
+		if(url==null||url.trim().equals("")){
+			return "unknown";
+		}
+		String domain = "";
+		Pattern p = Pattern.compile("(?<=//)((\\w)+\\.)+\\w+");
+		Matcher matcher = p.matcher(url);  
+		if(matcher.find()){
+			domain = matcher.group();
+			if(domain.startsWith("www."))
+				domain = domain.substring(4);
+		}
+		return domain;
 	}
 }
