@@ -1,0 +1,44 @@
+#!/bin/bash
+
+CN_RESULT_PATH="/yundisk/bilin-hadoop/result/logprocess_cn"
+S3PATH='s3://bilin/hadoop'
+LOCAL_JOB_HOME="/home/ec2-user/mataotao/bilin-data"
+LOGS="bid win imp clk cvs"
+
+# Store result to database
+# param 2 {logtypes,time=YYYYMMDDHH}
+# return 1 if sync from s3 error
+# return 2 if store to database error
+function store2db(){
+	local day=${2:0:8}
+	local hour=${2:8:2}
+	local result_path=$CN_RESULT_PATH/$2
+	test -e $result_path && rm -fr $result_path
+	mkdir -p $result_path/last
+	touch $result_path/last/success
+	for log in $1;do
+		mkdir -p $result_path/$log/$day/$hour
+		
+		local result_file=$(aws --profile bilin_cn s3 ls $S3PATH/result/log_analysis/$log/$day/$hour | wc -l)
+		if [ $result_file -eq 0 ];then
+			echo "$log result is not exists"
+			continue
+		fi
+		
+		aws --profile bilin_cn s3 sync --quiet $S3PATH/result/log_analysis/$log/$day/$hour $result_path/$log/$day/$hour || return 1
+		echo "Sync $log to local fs"
+		
+		cat $result_path/$log/$day/$hour/* >> $result_path/last/$log-$2
+		echo "$log-$2" >> $result_path/last/success
+	done
+	echo "Copy result to local successfully. Start store result to database rs_data"
+	hour_sec=$(date -d "$day $hour" +%s)
+	hour_sec=$(( $hour_sec/3600 + 8 ))
+
+	python $LOCAL_JOB_HOME/logprocess/store2db_CN_v4.py $hour_sec $result_path || return 2
+	echo "$LOCAL_JOB_HOME/logprocess/store2db_CN_v4.py $hour_sec $result_path"
+	echo "Store result to database complete."
+	rm -fr $result_path
+}
+
+store2db "$LOGS" "$1"

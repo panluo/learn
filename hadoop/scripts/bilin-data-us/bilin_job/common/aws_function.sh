@@ -1,0 +1,165 @@
+#!/bin/bash
+# Program
+#	Global variable and global function for emr.
+# History
+#	
+
+
+#
+source ~/.bash_profile
+
+source $HOME/bilin_job/common/us_env
+
+# Global variable
+
+# emr cluster env
+#CLUSTER_ID="j-1ZHIC8FC1CW1Z"
+
+# bidder server env
+#BIDDER_NUMBER=4
+
+
+# s3 env
+S3PATH="$BUCKET/hadoop"
+S3_HOME="$BUCKET/hadoop"
+S3_JOB_HOME="$S3_HOME/job"
+S3_DATA_HOME="$S3_HOME/data_log"
+S3_RESLUT_HOME="$S3_HOME/result"
+
+# local env
+SCRIPT_PATH="$HOME/bilin_job"
+JOB_LOG_PATH="$LOCAL_DATA_HOME/log"
+LOCAL_JOB_HOME="$HOME/bilin_job"
+LOCAL_LOG_PATH="$LOCAL_DATA_HOME/log"
+LOCAL_RESULT_PATH="$LOCAL_DATA_HOME/result"
+KEY_PAIR_FILE="$HOME/.bilin/bilin2014_east.pem"
+
+
+# emr cluster local env
+EMR_JOB_HOME="/home/hadoop/bilin_emr_job/job"
+EMR_RESULT_HOME="/mnt/bilin_emr/result"
+
+
+# bilin env
+SSP="pulsepoint adconductor cox rubicon pubmatic admeta"
+
+# other env
+MAIL_TO="taotao.ma@bilintechnology.com xinxin.shi@bilintechnology.com"
+
+########################################################
+# Global function
+########################################################
+
+# Write log to file
+# param 2 {log level,log content}
+function write_log(){
+	logger -it $1 -p local6.$1 $2
+}
+
+# Send email to developer
+# param 1 {Message}
+function send_email(){
+	echo $1 | mail -s 'Error in log process' $MAIL_TO
+}
+
+#===============================================================================
+
+# Build the EMR cluster
+# No param
+# Return 1 if build cluster failed
+function create_Cluster(){
+	CLUSTER_ID=$(aws emr create-cluster --ami-version 3.1.2 \
+	--instance-groups Name=Master,InstanceGroupType=MASTER,InstanceType=m1.medium,InstanceCount=1 \
+	Name=Core,InstanceGroupType=CORE,InstanceType=m1.medium,InstanceCount=2 \
+	--no-auto-terminate \
+	--ec2-attributes SubnetId=subnet-f46d7c96,KeyName=hadoop \
+	--use-default-roles \
+	--log-uri $S3PATH/hadooplog \
+	| jq .ClusterId) || return 1
+	
+	echo "Cluster id : $CLUSTER_ID"
+	CLUSTER_ID=$(echo $CLUSTER_ID | sed 's/\"//g')
+	if [ "$CLUSTER_ID" == "" ];then
+		return 1
+	fi
+}
+
+# Terminate the running cluster
+# no param
+function term_cluster(){
+	aws emr terminate-clusters --cluster-ids $CLUSTER_ID
+}
+
+#===============================================================================
+
+# Judge if logs have transferred from bidder servers to s3 succssfully.
+# If not, wait until logs transfer completely.
+# param 1 {stime:YYYYMMDDHH}
+# return 1 if delete success file error
+# return 2 if transfer error
+# return 3 if time out (time=400s)
+# get_status
+
+function is_logs_ready(){
+	local stime=$1
+	local wait=0
+
+	while true;do
+		local count=$(aws s3 ls $S3PATH/data_log/status/ | grep "$stime" | wc -l)
+		local error=$(aws s3 ls $S3PATH/data_log/status/ | grep "$stime-error" | wc -l)
+		if [ $count -eq $BIDDER_NUMBER -a $error -eq 0 ];then
+			echo "logs ready and delete success file"
+			del_success_file $stime  || ( echo "delete success file error" && return 1)
+			return 0
+		elif [ $error -ne 0 ];then
+			errorlog=$(aws s3 ls $S3PATH/hadoop/status/ | grep "stime-error")
+			echo $errorlog
+			return 2
+		else
+			sleep 20
+		fi
+		wait=$[ $wait+1 ]
+		if [ $wait -gt 40 ];then
+			return 3
+		fi
+	done
+	
+}
+
+# Delete success file that transferred from bidder servers when they
+# transfer log to s3 successful
+# param 1 {stime=YYYYMMDDHH}
+function del_success_file(){
+	local files=$(aws s3 ls $S3PATH/data_log/status/ | grep "$1" | awk '{print $4}')
+	for file in $files;do
+		aws s3 rm $S3PATH/data_log/status/$file || return 1
+	done 	
+}
+
+# Wait until the job completed or failed. Query interval is 30s.
+# If return 0,the job has successful done
+# param 1 {step id}
+# waitForComplete
+
+function wait_for_complete(){
+	local start_time=$(date +%s)
+	local status="PENDING"
+	while [ "$status" == "PENDING" ] || [ "$status" == "RUNNING" ]
+	do
+		sleep 20
+		stat=$(aws emr describe-step --cluster-id $CLUSTER_ID --step-id $1) || return 1
+		status=$(echo $stat  | jq .Step.Status.State | sed 's/\"//g')
+		echo "job status: $status"
+	done
+
+	local end_time=$(date +%s)
+	local spend=$(($end_time - $start_time))
+	echo "Time the job spend(s): $spend"
+	if [ "$status" == "COMPLETED" ];then
+		echo "Job Completed"
+		return 0
+	else 
+		echo "Job Failed"
+		return 1
+	fi
+}
