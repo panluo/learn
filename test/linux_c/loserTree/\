@@ -1,0 +1,36 @@
+#include <stdio.h>
+
+#define n 30
+
+typedef struct type
+{
+    char * key;
+    long num;
+} KeyType;
+//typedef type KeyType;
+
+void readlines(){
+    FILE *tmp=fopen("/home/luo/domain","r");
+    char buf[200];
+    KeyType *sort[n];
+    char *result=NULL;
+    int i=0;
+    while(fgets(buf,200,tmp)!=NULL){
+        //printf("1%s",buf);
+        result=strtok(buf,"\t");
+        printf("%s",result)
+        /*get next token*/
+       // sort[i].num=strtok(NULL,"\t");
+
+        i++;
+        if(i>n)
+            break;
+    }
+    for(i=0;i<n;i++)
+        printf("%s++++%s",sort[i].key,sort[i].key);
+
+}
+
+void main(){
+    readlines();
+}

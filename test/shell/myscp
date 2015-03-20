@@ -1,0 +1,75 @@
+#!/bin/bash
+if [ $1 = "-r" ];then
+    list1=$2
+    list2=$3
+    files="true"
+else
+    list1=$1
+    list2=$2
+    files="false"
+fi
+domain=`echo $list2 | cut -d "@" -f2`
+if [ -d $domain ];then
+   user=`echo $list1 | cut -d "@" -f1`
+   domain=`echo $list1 | cut -d "@" -f2`
+else
+    user=`echo $list2 | cut -d "@" -f1`
+  #  domain=`echo $list1 | cut -d "@" -f2`
+fi
+domain=`echo $domain | cut -d ":" -f1`
+
+echo "loader : $user"
+
+case $user in
+    "luopan")
+        password="luopan"
+    ;;
+    "bilin")
+        password="bilin2014"
+    ;;
+    "bilinhadoop")
+        password="hadoop0987"
+    ;;
+    "root")
+        if [ $domain -eq "183.56.131.131" ];then
+            password="wkzwhu2004"
+        fi
+    ;;
+    *)
+        echo "Error; with error user name"
+    ;;
+esac
+
+echo "password : $password"
+
+if [ $password ];then
+
+#    expect -c "spawn scp $1 $2
+#    set timeout 10
+#    expect { 
+#        \"(yes/no)?\" {
+#        set timeout 10
+#        set erro 1
+#        send \"yes\n\"
+#        expect \"?assword:\"
+#        send \"${password}\r\"
+#        }
+#
+#        \"*?password:\"{
+#        set erro 2
+#        set timeout 10
+#        send \"${password}\r\"
+#        }
+#    }
+#    
+#    set timeout 10
+#    expect \"\#\"
+#    send \"uname\n\"
+#    expect \"linux\"
+#    send_user \"now you can do some operation on this terminal\n\"
+#    interact
+#    "
+    /home/luo/test/shell/scp.sh $list1 $list2 $password $files
+else
+        echo "error"    
+fi
